@@ -1,0 +1,49 @@
+version: '3'
+
+networks:
+  rustdesk-net:
+    external: false
+
+services:
+  rustdesksignalserver:
+    container_name: rustdesksignalserver
+    ports:
+      - 21115:21115
+      - 21116:21116
+      - 21116:21116/udp
+      - 21118:21118
+    image: rustdesk/rustdesk-server:latest
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+    command: hbbs -r <rustdesk server ip>:21117
+    volumes:
+      - /opt/DockerApps/rustdesksignalserver:/root
+    networks:
+      - rustdesk-net
+    depends_on:
+      - rustdeskrelayserver
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"
+      - "com.centurylinklabs.watchtower.depends-on=rustdeskrelayserver"
+
+  rustdeskrelayserver:
+    container_name: rustdeskrelayserver
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+    ports:
+      - 21117:21117
+      - 21119:21119
+    image: rustdesk/rustdesk-server:latest
+    command: hbbr
+    volumes:
+      - /opt/DockerApps/rustdeskrelayserver:/root
+    networks:
+      - rustdesk-net
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope" 

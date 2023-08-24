@@ -1,0 +1,130 @@
+---
+version: "2.4"
+services:
+  node-exporter:
+    container_name: monitoring-node-exporter
+    expose:
+      - 9100
+    hostname: homeserver-exporter
+    image: prom/node-exporter:latest
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    networks:
+      - homeservermonitor_default
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"
+
+  cadvisor:
+    command:
+    - '--docker_only=true'
+    - '--housekeeping_interval=30s'
+    - '--disable_metrics=accelerator,cpu_topology,disk,memory_numa,tcp,udp,percpu,sched,process,hugetlb,referenced_memory,resctrl,cpuset,advtcp,memory_numa'
+    - '--store_container_labels=false'
+    - '--event_storage_event_limit=default=0'
+    - '--event_storage_age_limit=default=0'
+    container_name: monitoring-cadvisor
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    expose:
+      - 8080
+    hostname: homeserver-cadvisor
+    image: zcube/cadvisor:latest
+    ipc: shareable
+    networks:
+      - homeservermonitor_default
+    privileged: true
+    restart: unless-stopped
+    security_opt:
+      - label=disable
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /etc/machine-id:/etc/machine-id:ro
+      - /var/lib/dbus/machine-id:/var/lib/dbus/machine-id:ro
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"
+      
+  grafana:
+    container_name: monitoring-grafana
+    environment:
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SECURITY_ADMIN_USER=<admin username>
+      - GF_SECURITY_ADMIN_PASSWORD=<admin user password>
+      - GF_PATHS_CONFIG=/etc/grafana/grafana.ini
+      - GF_PATHS_DATA=/var/lib/grafana
+      - GF_PATHS_HOME=/usr/share/grafana
+      - GF_PATHS_LOGS=/var/log/grafana
+      - GF_PATHS_PLUGINS=/var/lib/grafana/plugins
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      - GF_SMTP_ENABLED=true
+      - GF_SMTP_FROM_ADDRESS=<From email id>
+      - GF_SMTP_HOST=<smtp server>:<port>
+      - GF_SMTP_PASSWORD=<From email password>
+      - GF_SMTP_USER=<From email id>
+      - GF_SERVER_ROOT_URL=http://<server ip address>:33000
+    hostname: homeserver-grafana
+    image: grafana/grafana:latest
+    networks:
+      - homeservermonitor_default
+    ports:
+      - 33000:3000
+    restart: unless-stopped
+    volumes:
+      # to be modified depending on your needs
+      - /opt/DockerApps/grafana/data:/var/lib/grafana
+      - /opt/DockerApps/grafana/grafana.ini:/etc/grafana/grafana.ini
+      - /opt/DockerApps/grafana/provisioning:/etc/grafana/provisioning
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"
+
+  prometheus:
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}'
+    container_name: monitoring-prometheus
+    expose:
+      - 9090
+    hostname: homeserver-prometheus
+    image: prom/prometheus:latest
+    user: root
+    networks:
+      - homeservermonitor_default
+    restart: unless-stopped
+    volumes:
+      # to be modified depending on your needs
+      - /opt/DockerApps/prometheus/data:/prometheus
+      - /opt/DockerApps/prometheus/config:/etc/prometheus/
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"
+    links:
+      - cadvisor:cadvisor
+      - node-exporter:node-exporter
+
+  influxdb:
+    container_name: influxdb
+    image: influxdb:latest
+    ports:
+      - '8086:8086'
+    volumes:
+      - /opt/DockerApps/influxdb/influxdb-data:/var/lib/influxdb2
+      - /opt/DockerApps/influxdb/etc/influxdb2:/etc/influxdb2
+      - /etc/ssl/cert.pem/:/etc/ssl/cert.pem
+      - /etc/ssl/cert-key.pem/:/etc/ssl/cert-key.pem
+    command: influxd --tls-cert=/etc/ssl/cert.pem --tls-key=/etc/ssl/cert-key.pem
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"
+    restart: unless-stopped
+
+networks:
+  homeservermonitor_default:

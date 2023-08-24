@@ -1,0 +1,137 @@
+version: "3"
+
+##VPN
+services:
+  gluetunsg:
+    image: qmcgaw/gluetun
+    container_name: gluetun-sg
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    #dns:
+    #  - <dns ip>
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+      - VPN_SERVICE_PROVIDER=custom
+      - VPN_TYPE=wireguard
+      - VPN_ENDPOINT_IP=<wg VPN_ENDPOINT_IP>
+      - VPN_ENDPOINT_PORT=<wg VPN_ENDPOINT_PORT>
+      - FIREWALL_VPN_INPUT_PORT=<wg VPN_ENDPOINT_PORT>
+      - WIREGUARD_PUBLIC_KEY=<wg public key>
+      - WIREGUARD_PRIVATE_KEY=<wg private key>
+      - WIREGUARD_PRESHARED_KEY=<wg preshared key>
+      - WIREGUARD_ADDRESSES=<wg ip>/<subnet mask>
+      # - DNS_ADDRESS=<dns ip>
+      - FIREWALL_OUTBOUND_SUBNETS=<LAN subnet>/<subnet mask> # Example 192.168.129.0/24
+      - FIREWALL_INPUT_PORTS=8000
+      - HTTP_CONTROL_SERVER_ADDRESS=:8000
+      - UPDATER_PERIOD=24h
+      - HTTPPROXY=on
+      - HTTPPROXY_USER=<HTTP proxy username>
+      - HTTPPROXY_PASSWORD=<HTTP proxy password>
+      - HTTPPROXY_LOG=on
+    ports:
+      - 8888:8888/tcp
+      - 8000:8000/tcp
+      - 31080:31080
+      - 9091:9091
+      - 51413:51413
+      - 51413:51413/udp
+      - 9696:9696
+      - 8080:8080
+      - 56655:56655
+      - 56655:56655/udp
+      - 4711:4711
+      - 4712:4712
+      - 4662:4662
+      - 4665:4665
+      - 4672:4672/udp
+      - 32400:32400
+      - 1900:1900/udp
+      - 32410:32410/udp
+      - 32412:32412/udp
+      - 32413:32413/udp
+      - 32414:32414/udp
+      - 32469:32469
+    restart: always
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitoronlyscope"
+      - "com.centurylinklabs.watchtower.depends-on=prowlarr,qbittorrent"
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:develop
+    container_name: prowlarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+    volumes:
+      - /opt/DockerApps/prowlarr/config:/config
+    restart: always
+    network_mode: "service:gluetunsg"
+    depends_on:
+      gluetunsg:
+        condition: service_healthy
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"
+      - "autoheal=true"
+    healthcheck:
+      test: ping -W 1 -w 1 -q -s 8 1.1.1.1 || exit 1
+      interval: 10s
+      retries: 1
+      start_period: 10s
+      timeout: 5s
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+      - WEBUI_PORT=8080
+    volumes:
+      - /opt/DockerApps/qbittorrent/config:/config
+      - /opt/DockerApps/qbittorrent/healthcheck:/opt/healthcheck
+      - /media/pi/Downloads/torrents:/downloads
+    restart: always
+    network_mode: "service:gluetunsg"
+    depends_on:
+      gluetunsg:
+        condition: service_healthy
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"
+      - "autoheal=true"
+    healthcheck:
+      test: /bin/bash /opt/healthcheck/healthcheck.sh || exit 1
+      interval: 10s
+      retries: 1
+      start_period: 10s
+      timeout: 5s
+
+  plex:
+    image: lscr.io/linuxserver/plex:latest
+    container_name: plex
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - VERSION=docker
+      - PLEX_CLAIM=<plex claim key> #https://quickbox.io/knowledge-base/v2/applications/plex/claim-plex/
+    devices:
+      - /dev/dri:/dev/dri
+    volumes:
+      - /opt/DockerApps/plex/config:/config
+      - /media/pi/Ocean:/Ocean
+      - /media/pi/Linus:/Linus
+      - /media/pi/Yen:/Yen
+      - /media/pi/Rusty:/Rusty
+    restart: always
+    network_mode: "service:gluetunsg"
+    depends_on:
+      gluetunsg:
+        condition: service_healthy
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope" 

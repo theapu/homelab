@@ -1,0 +1,1753 @@
+#
+### Qbittorent shell client
+##
+##
+function exit ()
+{
+{ 2>&3 curl "${QBarg[@]}" -s --cookie $QBcookie "${QBurl}/api/v2/auth/logout" &>/dev/null & } 3>&2 2>/dev/null
+disown &>/dev/null
+local exitcode=0
+[ -z "$1" ] || exitcode="$1"
+builtin exit "$exitcode"
+}
+
+function __META_qblogin ()
+{
+local exitcode=""
+QBcookie=$(curl "${QBarg[@]}" -s -i --header "Referer: $QBurl" --data "username=$QBlogin&password=$QBpassword" "$QBurl/api/v2/auth/login" 2>/dev/null |
+while read line1 line2 line3; do [ -z "$exitcode" ] && { exitcode="$line2"; printf "$line2;"; }; [ "$line1" == "set-cookie:" ] && printf "$line2"; done)
+exitcode=$(echo "$QBcookie" | ( IFS=";"; read line1 line2; echo $line1 ) )
+QBcookie=$(echo "$QBcookie" | ( IFS=";"; read line1 line2; echo $line2 ) )
+#QBcookie=$(curl "${QBarg[@]}" -c - --header "Referer: $1" --data "username=$login&password=$password" "$1/api/v2/auth/login" 2>/dev/null | cut -sf7)
+if [ -z "$QBcookie" ]
+    then
+     if [ "$exitcode" == 200 ]
+        then
+         >&2 echo "Fail. Invalid username/password"
+         return 126
+        else
+         if [ "$exitcode" == 403 ]
+            then
+             >&2 echo "Fail. Your IP is banned"
+             return 126
+            else
+             >&2 echo "Fail. Check URL and/or SSL certificate"
+             return 1
+         fi
+     fi
+fi
+return 0
+}
+
+## qbcurl: Make a custom cURL WebUI request to the qBittorrent server
+## qbcurl: The use of "api/v2" is assumed
+## Usage: qbcurl URL_COMMAND [CURL_OPT_1] [CURL_OPT_2] ...
+## qbcurl: Encapsulate URL_COMMAND symbols in quotes if necessary
+## qbcurl: The "$QBhash" variable can be used in URL_COMMAND to pass the hash of the selected torrent
+## qbcurl: Example: qbcurl "torrents/files?hash=$QBhash" -s | jq
+
+#alias qbcurl="__META_qbcall qbcurl"
+function __META_qbcurl ()
+{
+if [ -z "$1" ]
+    then
+     qbhelp -u qbcurl
+     return 127
+fi
+local command="$1"
+shift
+curl "${QBarg[@]}" --cookie "$QBcookie" "$@" "${QBurl}/api/v2/$command"
+return $?
+}
+
+function __META_qbrequest ()
+{
+local opt="raw"
+if [ "$1" == "-e" ]
+    then
+     opt="code"
+     shift
+fi
+local command="$1"
+shift
+local resp
+if [ "$opt" == "raw" ]
+    then
+     resp=$(curl "${QBarg[@]}" -s --cookie "$QBcookie" "$@" "${QBurl}/api/v2/$command" 2>/dev/null)
+     if [ "$resp" == "Forbidden" ]
+        then
+         __META_qblogin
+         resp=$?
+         [ "$resp" == "0" ] || builtin exit "$resp"
+         resp=$(curl "${QBarg[@]}" -s --cookie "$QBcookie" "$@" "${QBurl}/api/v2/$command" 2>/dev/null)
+     fi
+    else
+     resp=$(curl "${QBarg[@]}" -s  -o /dev/null -w "%{http_code}" --cookie "$QBcookie" "$@" "${QBurl}/api/v2/$command" 2>/dev/null)
+     if [ "$resp" == "403" ]
+        then
+         __META_qblogin
+         resp=$?
+         [ "$resp" == "0" ] || builtin exit "$resp"
+         resp=$(curl "${QBarg[@]}" -s  -o /dev/null -w "%{http_code}" --cookie "$QBcookie" "$@" "${QBurl}/api/v2/$command" 2>/dev/null)
+     fi
+fi
+echo "$resp"
+return 0
+}
+
+##this is just for --help?
+function __META_qbcall ()
+{
+if [ "$2" == "-h" ]
+    then
+     __META_qbhelp -u "$1"
+    else
+     if [ "$2" == "--help" ]
+        then
+         __META_qbhelp "$1"
+        else
+         local func="$1"
+         shift
+         "__META_$func" "$@"
+     fi
+fi
+}
+
+# qbhelp: qbc usage help
+# Usage: qbhelp [(list | [-u] FUNCTION)]
+# Usage:qbhelp Usage: FUNCTION (-h|--help)
+# qbhelp: Options:
+# qbhelp: list - list of available FUNCTIONs
+# qbhelp: -u FUNCTION - the usage of FUNCTION
+# qbhelp: FUNCTION - the help for FUNCTION
+
+alias qbhelp="__META_qbcall qbhelp"
+function __META_qbhelp ()
+{
+if [ "$1" == "list" ]
+    then
+     while read line1 line2 line3 line4
+        do
+         [ "$line1" == "#" ] && [ "$line2" == "Usage:" ] && echo "$line3"
+        done < "$QBhelpfile"
+    else
+     local usage=""
+     if [ "$1" == "-u" ]
+        then
+         usage="yes"
+         shift
+     fi
+     local funct="$1"
+     [ -z "$1" ] && funct="qbhelp"
+     [ "${funct:0:2}" == "qb" ] || funct="qb$funct"
+     while read line1 line2 line3 line4
+        do
+         if [ "$line1" == "#" ] && [ "$line2" == "Usage:" ] && [ "$line3" == "${funct}" ]
+            then
+             echo "Usage: $line3 $line4"
+             echo
+            else
+             if  {
+                  [ "$line1" == "#" ] && [ "$line2" == "Usage:${funct}" ]
+                 } ||
+                 {
+                  [ -z "$usage" ] && [ "$line1" == "#" ] && [ "$line2" == "${funct}:" ]
+                 }
+                then
+                 echo "$line3 $line4"
+                 echo
+             fi
+         fi
+        done < "$QBhelpfile"
+fi
+}
+
+
+# qbversion: Print the versions of used software
+# Usage: qbversion [(app|api|build [qt|libtorrent|boost|openssl|bitness])]
+alias qbversion="__META_qbcall qbversion"
+function __META_qbversion ()
+{
+if [ -z "$1" ]
+    then
+     echo "$QBversion"
+     return 0
+fi
+resp="null"
+if [ "$1" == "app" ]
+    then
+     resp=$(__META_qbrequest "app/version")
+    else
+     if [ "$1" == "api" ]
+      then
+      resp=$(__META_qbrequest "app/webapiVersion")
+     fi
+fi
+if [ "$1" == "build" ]
+    then
+     resp=$(__META_qbrequest "app/buildInfo")
+     if [ -z "$resp" ]
+        then
+         >&2 echo 'An error is occured'
+         return 1
+     fi
+     if [ -z $2 ]
+        then
+         echo $resp | jq 2>/dev/null
+         return 0
+        else
+         resp=$(echo $resp| jq -r ".$2" 2>/dev/null)
+     fi
+fi
+if [ -z "$resp" ]
+    then
+     >&2 echo 'An error is occured'
+     return 1
+fi
+if [ "$resp" == "null" ]
+    then
+     >&2 qbhelp -u qbversion
+     return 127
+    else
+     echo $resp
+     return 0
+fi
+}
+
+# qbnetwork:  Show the general network status of the server
+# Usage: qbnetwork
+alias qbnetwork="__META_qbcall qbnetwork"
+function __META_qbnetwork ()
+{
+__META_qbrequest "transfer/info" |jq 2>/dev/null
+}
+
+
+# qbpref: Show the value of specified preference property, or print all preferences
+# Usage: qbpref [(-r PREF_PROPERTY | PREF_PROPERTY_1 [PREF_PROPERTY_2 ...])]
+# qbpref: With the "-r" option the function returns the raw value of a property
+
+alias qbpref="__META_qbcall qbpref"
+function __META_qbpref ()
+{
+if [ "$1" == "-r" ]
+    then
+     if [ -z "$2" ] || [ $# -gt 2 ]
+        then
+         >&2 qbhelp -u qbpref
+         return 127
+     fi
+     __META_qbrequest "app/preferences" | jq -r ".$2" 2>/dev/null
+     return 0
+fi
+if [ -z "$1" ]
+    then
+     __META_qbrequest "app/preferences" | jq 2>/dev/null
+    else
+     local jj='{"'"$1"'":.'"$1"
+     shift
+     while [ ! -z "$1" ]
+        do
+         jj="$jj"',"'"$1"'":.'"$1"
+         shift
+     done
+     jj="$jj"'}'
+     __META_qbrequest "app/preferences" | jq "$jj" 2>/dev/null
+fi
+return 0
+}
+
+# qbprefedit: Send new values of specified preference properties
+# Usage: qbprefedit [-s] [-n] PREF_PROPERTY_1 NEW_VALUE_1 [PREF_PROPERTY_2 NEW_VALUE_2 ...]
+# qbprefedit: The option -n prevents an additional check the values from the server after the request. The option "-s" forces "-n" and also prevents any output or user confirmations except (may be) error messages
+# qbprefedit: To change the WebUI password in a secure way (from stdin) just omit the NEW_VALUE_1 argument in "qbprefedit web_ui_password". A change of web_ui_password property together with another options is not supported.
+
+alias qbprefedit="__META_qbcall qbprefedit"
+function __META_qbprefedit ()
+{
+local silent="false"
+local nocheck="false"
+local strval=""
+if  [ "$1" == "-s" ]
+    then
+     silent="true"
+     nocheck="true"
+     shift
+fi
+if  [ "$1" == "-n" ]
+    then
+     nocheck="true"
+     shift
+fi
+if [ -z "$1" ]
+    then
+     >&2 qbhelp -u qbprefedit
+     return 127
+fi
+if [ "$1" == "web_ui_password" ]
+then
+local newpasswd
+local newpasswd1
+if [ -z "$2" ]
+    then
+     read -rs -p "New password: " newpasswd
+     echo
+     read -rs -p "Retype new password: " newpasswd1
+     echo
+    else
+     newpasswd="$2"
+     newpasswd1="$2"
+fi
+if [ "$newpasswd" == "$newpasswd1" ]
+    then
+     newpasswd='json='$(echo {} | jq --arg pass "$newpasswd" '{ "web_ui_password": $pass }')
+     local resp=$(__META_qbrequest -e "app/setPreferences" --data-urlencode "$newpasswd")
+     if [ "$resp" != "200" ]
+        then
+         >&2 echo 'An error is occured'
+         return 1
+        else
+         [ "$silent" == "true" ] || echo 'The password was sent'
+         return 0
+     fi
+    else
+     >&2 echo 'Different passwords'
+     return 1
+fi
+fi
+local pref=$(__META_qbrequest "app/preferences" 2>/dev/null)
+if [ -z "$pref" ]
+    then
+     >&2 echo 'An error is occured'
+    return 1
+fi
+local j='{}'
+while [ ! -z "$1" ]
+    do
+     if [ "$1" == "web_ui_password" ]
+        then
+         >&2 echo 'Can not change "web_ui_password" together with other preferences'
+         return 1
+     fi
+     local t2=$(echo $pref| jq ".$1" 2>/dev/null)
+     if [ ${t2:0:1} == '"' ]
+        then
+         j=$(echo "$j" | jq -c --arg k "$1" --arg v "$2" '.+([ { "key" : $k, "value": $v } ] | from_entries)' 2>/dev/null)
+        else
+         j=$(echo "$j" | jq -c --arg k "$1" '.+([ { "key" : $k, "value":'"$2"' } ] | from_entries)' 2>/dev/null)
+     fi
+     if [ -z "$j" ]
+        then
+         >&2 echo 'An error is occured'
+         return 1
+     fi
+     shift
+     shift
+    done
+local resp=''
+local jj=''
+if [ "$silent" == "false" ]
+    then
+     jj=$(echo $j | jq -r 'to_entries|"{"+([.[]|"\""+.key+"\":"+"."+.key+","]|add|.[0:length-1])+"}"' 2>/dev/null)
+     echo 'Old preferences:'
+     echo $pref| jq "$jj" 2>/dev/null
+     echo 'New preferences:'
+     echo $j | jq 2>/dev/null
+     read -r -p 'Type "yes" to send the new preferences to the server: ' resp
+     if [ "$resp" != "yes" ]
+        then
+         >&2 echo 'Cancelled'
+         return 1
+     fi
+fi
+resp=$(__META_qbrequest -e "app/setPreferences" --data-urlencode "json=$j" 2>/dev/null)
+if [ "$resp" != "200" ]
+    then
+     >&2 echo 'An error is occured'
+     return 1
+fi
+if [ "$nocheck" == "false" ]
+    then
+     local pref=$(__META_qbrequest "app/preferences" 2>/dev/null)
+     echo 'Just checked preferences:'
+     echo $pref| jq $jj 2>/dev/null
+    else
+     if [ "$silent" == "false" ]
+        then
+         echo 'The preferences were sent'
+     fi
+fi
+}
+
+# qbmenu:  Show editable options not included into the preferences:alternative speed mode, existing categories and tags
+# Usage: qbmenu [-r] [altspeed|categories|tags]
+# qbmenu: Option "-r" for a raw output of requested values
+alias qbmenu="__META_qbcall qbmenu"
+function __META_qbmenu ()
+{
+local raw=""
+if [ "$1" == "-r" ]
+    then
+     raw="true"
+     shift
+fi
+[ -z "$1" ] && [ -z "$raw" ] && __META_qbmenu altspeed categories tags && return 0
+[ -z "$1" ] && __META_qbmenu -r altspeed categories tags && return 0
+case "$1" in
+    altspeed)
+     local resp=$(__META_qbrequest "transfer/speedLimitsMode" 2>/dev/null)
+     [ -z "$raw" ] && printf 'Alternative speed state enabled: '
+     if [ "$resp" == "0" ]
+        then
+         echo false
+        else
+         if [ "$resp" == "1" ]
+            then
+             echo true
+            else
+             >&2 echo 'An error is occured'
+             return 1
+         fi
+     fi
+     shift
+     if [ -z "$raw" ]; then  __META_qbmenu "$@" null; else __META_qbmenu -r "$@" null ; fi
+    ;;
+    categories)
+    [ -z "$raw" ] && echo 'Categories:'
+     __META_qbrequest "torrents/categories" | jq -r '[to_entries|.[]|{"key":.key,"value":.value.savePath}]| from_entries' 2>/dev/null
+     shift
+     if [ -z "$raw" ]; then  __META_qbmenu "$@" null; else __META_qbmenu -r "$@" null ; fi
+    ;;
+    tags)
+     [ -z "$raw" ] && printf 'Tags: '
+     __META_qbrequest "torrents/tags" 2>/dev/null |jq -c 2>/dev/null
+      shift
+     if [ -z "$raw" ]; then  __META_qbmenu "$@" null; else __META_qbmenu -r "$@" null ; fi
+    ;;
+    null)
+    return 0
+    ;;
+    *)
+     >&2 qbhelp -u qbmenu
+     return 127
+    ;;
+esac
+return 0
+}
+
+# qbmenuedit:  Change alternative speed mode, categories and tags
+# Usage: qbmenuedit altspeed (true|false|toggle)
+# Usage:qbmenuedit Usage: qbmenuedit categories -d NAME #(remove a category)
+# Usage:qbmenuedit Usage: qbmenuedit categories NAME PATH #(create or edit a category)
+# Usage:qbmenuedit Usage: qbmenuedit tags [-d] NAME #(create or remove a tag)
+alias qbmenuedit="__META_qbcall qbmenuedit"
+function __META_qbmenuedit ()
+{
+if [ "$#" -lt 2 ]
+    then
+     >&2 qbhelp -u qbmenuedit
+     return 127
+fi
+local arg=""
+local resp=""
+case "$1" in
+    altspeed)
+     local resp=$(__META_qbmenu -r altspeed)
+     [ -z "$resp" ] && { >&2 echo 'An error is occured'; return 1; }
+     if [ "$resp" != "$2" ]
+        then
+         resp=$(__META_qbrequest -e "transfer/toggleSpeedLimitsMode" 2>/dev/null)
+         [ "$resp" == "200" ] && return 0
+         >&2 echo 'An error is occured'
+         return 1
+     fi
+     resp=200
+    ;;
+    categories)
+     if [ "$2" == "-d" ]
+        then
+         arg=$(echo "$3"|jq -rR '@uri')
+         resp=$(__META_qbrequest -e "torrents/removeCategories?categories=$arg")
+        else
+         arg=$(echo "$2"|jq -rR '@uri')
+         local argpath=$(echo "$3"|jq -rR '@uri')
+         local hasarg=$(__META_qbmenu -r categories | jq --arg arg "$2" 'has($arg)' 2>/dev/null)
+         if [ "$hasarg" == "true" ]
+            then
+             resp=$(__META_qbrequest -e "torrents/editCategory?category=$arg&savePath=$argpath")
+            else
+             if [ "$hasarg" == "false" ]
+                then
+                 resp=$(__META_qbrequest -e "torrents/createCategory?category=$arg&savePath=$argpath")
+                else
+                 >&2 echo 'An error is occured'
+                 return 1
+             fi
+         fi
+     fi
+    ;;
+    tags)
+     if [ "$2" == "-d" ]
+        then
+         arg=$(echo "$3"|jq -rR '@uri')
+         resp=$(__META_qbrequest -e "torrents/deleteTags?tags=$arg")
+        else
+         arg=$(echo "$2"|jq -rR '@uri')
+         resp=$(__META_qbrequest -e "torrents/createTags?tags=$arg")
+     fi
+    ;;
+    *)
+     >&2 qbhelp -u qbmenuedit
+     return 127
+    ;;
+esac
+if [ "$resp" != "200" ]
+    then
+     >&2 echo 'An error is occured'
+     return 1
+fi
+return 0
+}
+
+# qbadd: Add a torrent by a URL (use quotes), or by a torrent FILE.
+# Usage: qbadd ( -u 'URL'| -f FILE)  [ARG_1=VALUE_1] [ARG_2=VALUE_2] ...
+# qbadd: If FILE='-' then the content of a torrent file will be read from stdin
+# qbadd: The available ARGs are listed in WebUI API https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-(qBittorrent-4.1)#add-new-torrent
+
+alias qbadd="__META_qbcall qbadd"
+function __META_qbadd ()
+{
+local datarray=("${QBarg[@]}")
+datarray+=("-s" "-o" "/dev/null" "-w" "%{http_code}" "--cookie" "$QBcookie")
+local farg=""
+if [ "$1" == "-u" ]
+    then
+     local uarg=""
+     if [ "$2" == "-" ]
+        then
+         echo 'Paste the url and press Enter:'
+         read -r uarg
+        else
+         uarg="$2"
+     fi
+     if [ -z "$uarg" ]
+        then
+         >&2 echo "Empty url"
+         return 127
+     fi
+     datarray+=("-F" "urls=$uarg")
+     farg="/dev/null"
+    else
+     if [ "$1" == "-f" ]
+        then
+         if [ -z "$2" ]
+            then
+             >&2 echo "Empty filename"
+             return 127
+         fi
+         datarray+=("-F" "torrents=@-")
+         farg="$2"
+        else
+         >&2 qbhelp -u qbadd
+         return 127
+     fi
+fi
+shift
+shift
+while [ ! -z "$1" ]
+    do
+     datarray+=("-F" "$1")
+     shift
+    done
+local oldinfo=$(__META_qbrequest 'torrents/info?sort=added_on')
+local resp
+if [ "$farg" == '-' ]
+    then
+     resp=$(curl "${datarray[@]}" "${QBurl}/api/v2/torrents/add" 2>/dev/null)
+    else
+     resp=$(curl "${datarray[@]}" "${QBurl}/api/v2/torrents/add" 2>/dev/null <"$farg")
+fi
+if [ "$resp" != "200" ]
+    then
+      >&2 echo 'An error is occured.'
+     return 1
+fi
+local newinfo=$(__META_qbrequest 'torrents/info?sort=added_on' 2>/dev/null)
+local diff=$(jq -rn --argjson j "$oldinfo" --argjson jj "$newinfo" '([$jj|.[]|.hash])-([$j|.[]|.hash])|if (.|length)==1 then (.[0]) else . end' 2>/dev/null)
+if [ "$diff" == '[]' ]
+    then
+     sleep 1
+     newinfo=$(__META_qbrequest 'torrents/info?sort=added_on' 2>/dev/null)
+     diff=$(jq -rn --argjson j "$oldinfo" --argjson jj "$newinfo" '([$jj|.[]|.hash])-([$j|.[]|.hash])|if (.|length)==1 then (.[0]) else . end' 2>/dev/null)
+     if [ "$diff" == '[]' ]
+        then
+         >&2 echo 'Warning: No new torrent is added'
+         return 0
+     fi
+fi
+if [ "${diff:0:1}" == '[' ]
+    then
+      >&2 echo 'Warning: More than one torrents were added recently. Please check them manually'
+     return 0
+fi
+QBhash="$diff"
+echo "Torrent with hash="$QBhash" is added"
+jq -n --arg hash "$QBhash" --argjson jj "$newinfo" '$jj|.[]|select(.hash==$hash)|
+.name+", size: "+(.size /1048576|trunc|tostring)+"Mb"' 2>/dev/null
+}
+
+
+
+## qblist: List of torrents with a short info. The torrents are sorted by the addition time. The new torrents always in the end
+## Usage: qblist
+
+# qblist: List of torrents with a short info.
+# Usage: qblist [-r] [--jqselect FILTER] [--jqsort FILTER] [--jq FORMAT] [INDEX_1] [INDEX_2]
+# qblist: Option -r: raw output
+# qblist: Without INDEX_1 and INDEX_2 print info of all torrents. The torrents are sorted by the addition time and indexed by numbers
+# qblist: Arguments INDEX_1 and INDEX_2 determine an interval of torrents to be shown
+# qblist: Advanced options: --jqselect and --jqsort for inserting "select" and "sort_by" jq-filters
+# qblist: E.g., qblist --jqselect '(.category=="My Category")' --jqsort '(.name)|reverse'
+# qblist: Advanced option: --jq enables a possibility to define an own jq-format for output lines
+# qblist: E.g., the following command prints hashes and names of torrents which have the tag "My tag":
+# qblist: qblist --jqselect '(.tags|split(", ")|.[]|select(.=="My tag"))' --jq '.hash+"/"+.name'
+# qblist: The default format of qblist is defined in the variable
+# qblist: QBlistjq='(.index|tostring)+". "+.name+", "+(.progress*100|trunc|tostring)+"% of "+(.size /1048576|trunc|tostring)+"Mb, state:"+.state'
+
+alias qblist="__META_qbcall qblist"
+function __META_qblist ()
+{
+local rawar=()
+if  [ "$1" == "-r" ]
+    then
+     rawar=('-r')
+     shift
+    else
+     rawar=()
+fi
+local selectfilter=""
+if [ "$1" == "--jqselect" ]
+    then
+     [ -z "$2" ] && { >&2 qbhelp -u qbtorcontent; return 127; }
+     selectfilter="|select$2"
+     shift
+     shift
+fi
+local sortfilter=""
+if [ "$1" == "--jqsort" ]
+    then
+     [ -z "$2" ] && { >&2 qbhelp -u qbtorcontent; return 127; }
+     sortfilter="|sort_by$2"
+     shift
+     shift
+fi
+local filter=""
+if [ "$1" == "--jq" ]
+    then
+     [ -z "$2" ] && { >&2 qbhelp -u qbtorcontent; return 127; }
+     filter="$2"
+     shift
+     shift
+    else
+filter="$QBlistjq"
+fi
+local arg2
+local globfilter='to_entries|.[]|{"index":.key}+.value'
+if [ -z "$1" ]
+    then
+     __META_qbrequest "torrents/info?sort=added_on" |
+     jq "${rawar[@]}" "[$globfilter$selectfilter]$sortfilter|.[]|$filter" 2>/dev/null
+    else
+     local arg1="$1"
+     local arg2=""
+     if [ -z $2 ]
+        then arg2="$1"
+        else arg2="$2"
+     fi
+     local indexfilter="select(.index==$arg1 or (.index>$arg1 and .index<=$arg2))"
+     __META_qbrequest "torrents/info?sort=added_on" |
+     jq "${rawar[@]}" "[$globfilter|$indexfilter$selectfilter]$sortfilter|.[]|$filter" 2>/dev/null
+fi
+return 0
+}
+
+
+# qbdo: Pause, resume, recheck, reannounce, force start and priority change of the torrents
+# Usage: qbdo COMMAND [--jqselect FILTER] [INDEX_1] [INDEX_2]
+# Usage:qbdo COMMAND=pause, resume, recheck, reannounce, setForceStart, increasePrio, decreasePrio, topPrio, bottomPrio
+# qbdo: With the option "-a" the function does the global action, otherwise it does the action index interval
+# qbdo: Advanced option: --jqselect for inserting the "select" jq-filter. For example:
+# qbdo: qbdo pause --jqselect '(.state=="downloading")'
+# qbdo: Without third argument the function does the action for the selected torrent (see qbselect --help)
+alias qbdo="__META_qbcall qbdo"
+function __META_qbdo ()
+{
+if [ -z "$1" ]
+    then
+     >&2 qbhelp -u qbdo
+     return 127
+fi
+local hashes=""
+local resp=""
+local arg3=""
+local indexfilter=""
+local selectfilter=""
+local extra=""
+[ "$1" == "setForceStart" ] && extra='&value=true'
+local command="$1"
+if [ -z "$2" ]
+    then
+     if [ -z "$QBhash" ]
+         then
+          >&2 echo 'No selected torrent'
+          return 1
+     fi
+     hashes="$QBhash"
+    else
+     if [ "$2" == "-a" ]
+        then
+         hashes="all"
+        else
+         if [ "$2" == "--jqselect" ]
+            then
+             if [ -z "$3" ]
+                then
+                 >&2 qbhelp -u qbdo
+                 return 127
+             fi
+             selectfilter="|select$3"
+             shift
+             shift
+         fi
+         if [ ! -z "$2" ]
+            then
+             if [ -z "$3" ]
+                then
+                 arg3="$2"
+                else
+                 arg3="$3"
+             fi
+             indexfilter="|select(.index==$2 or (.index>$2 and .index<=$arg3))"
+         fi
+         hashes=$(__META_qbrequest 'torrents/info?sort=added_on'|
+         jq -r '[to_entries|.[]|{"index":.key}+.value'"$indexfilter$selectfilter"'|.hash]|if length==0 then "" else .[0]+([.[1:length]|.[]|"|"+.]|add) end' 2>/dev/null)
+         if [ -z "$hashes" ]
+            then
+             >&2 echo 'Warning: No matched torrents'
+             return 0
+         fi
+     fi
+fi
+resp=$(__META_qbrequest -e "torrents/$command?hashes=$hashes$extra" 2>/dev/null)
+if [ "$resp" != "200" ]
+    then
+     >&2 echo 'An error is occured'
+     return 1
+fi
+return 0
+}
+
+
+# qbselect: Select the torrent with the specified index from qblist
+# Usage: qbselect [-s| [-r] [--jq FORMAT]] [INDEX]
+# qbselect: Option -s: silent mode
+# qbselect: Option -r: raw output
+# qbselect: Advanced option: --jq enables a possibility to define an own jq-format for output info on the selected torrent
+# qbselect: The deafult format is defined in the variable
+# qbselect: QBselectjq='.name+", "+(.progress*100|trunc|tostring)+"% of "+(.size /1048576|trunc|tostring)+"Mb, "+.state+", "+(.dlspeed/1024|trunc|tostring)+" Kb/s"'
+
+alias qbselect="__META_qbcall qbselect"
+function __META_qbselect ()
+{
+local silent=""
+local filter=""
+local rawar=()
+if  [ "$1" == "-s" ]
+    then
+     silent="yes"
+     shift
+    else
+     silent=""
+     if  [ "$1" == "-r" ]
+        then
+         rawar=('-r')
+         shift
+        else
+         rawar=()
+     fi
+     if  [ "$1" == "--jq" ]
+        then
+         filter="$2"
+         shift
+         shift
+        else
+         filter="$QBselectjq"
+     fi
+fi
+if [ -z "$1" ] && [ -z "$QBhash" ]
+    then
+     >&2 echo 'No selected torrent'
+     return 1
+fi
+resp=""
+if [ ! -z "$1" ]
+    then
+     resp=$(__META_qbrequest 'torrents/info?sort=added_on')
+     QBhash=$(echo "$resp" | jq -r ".[$1].hash" 2>/dev/null)
+     [ -z "$silent" ] && echo "Torrent with hash="$QBhash" is selected"
+fi
+if [  -z "$silent" ]
+    then
+     if [ -z "$resp" ]
+        then
+         __META_qbrequest "torrents/info?hashes=$QBhash" | jq "${rawar[@]}" '.[] |'"$filter" 2>/dev/null
+        else
+         echo "$resp" | jq "${rawar[@]}" --arg qbhash "$QBhash" '.[]|select(.hash==$qbhash)'"$filter" 2>/dev/null
+     fi
+fi
+}
+
+# qbtordel: Remove the selected torrent.
+# Usage: qbtordel [-s] [-d]
+# qbtordel: Option "-s" is for a silent removing without an interactive confirmation.
+# qbtordel: Option "-d" is for removing also the downloaded data
+
+alias qbtordel="__META_qbcall qbtordel"
+function __META_qbtordel ()
+{
+if [ -z "$QBhash" ]
+    then
+     >&2 echo 'No selected torrent'
+     return 1
+fi
+local silent="false"
+if [ "$1" == "-s" ]
+    then
+     silent="true"
+     shift
+fi
+local deldata="false"
+if [ "$1" == "-d" ]
+    then
+     deldata="true"
+     shift
+fi
+local resp=""
+if [ "$silent" == "false" ]
+    then
+     printf "Removing the torrent with hash=$QBhash"
+     [ "$deldata" == "true" ] && printf " and the downloaded data"
+     echo
+     local filter='.name+", "+(.progress*100|trunc|tostring)+"% of "+(.size /1048576|trunc|tostring)+"Mb, state:"+.state'
+     __META_qbrequest "torrents/info?hashes=$QBhash" 2>/dev/null| jq '.[] |'"$filter" 2>/dev/null
+     read -p 'Type "yes" to confirm: ' resp
+     [ "$resp" != "yes" ] && { echo 'Cancelled'; return 1; }
+fi
+resp=$(__META_qbrequest -e "torrents/delete?hashes=$QBhash&deleteFiles=$deldata")
+if [ "$resp" == "200" ]
+    then
+     unset QBhash
+     return 0
+fi
+echo "An error is occured"
+return 1
+}
+
+# qbtorinfo: Get the specified information of the selected torrent, or print it completely
+# Usage: qbtorinfo [(-r INFO_PROPERTY | INFO_PROPERTY_1 [INFO_PROPERTY_2 ...])]
+
+alias qbtorinfo="__META_qbcall qbtorinfo"
+function __META_qbtorinfo ()
+{
+if [ -z "$QBhash" ]
+    then
+     >&2 echo 'No selected torrent'
+     return 1
+fi
+if [ "$1" == "-r" ]
+    then
+     if [ -z "$2" ] || [ $# -gt 2 ]
+        then
+         >&2 qbhelp -u qbtorinfo
+         return 127
+     fi
+     __META_qbrequest "torrents/info?hashes=$QBhash" | jq -r ".[]|.$2" 2>/dev/null
+     return 0
+fi
+if [ -z "$1" ]
+    then
+     __META_qbrequest "torrents/info?hashes=$QBhash" | jq ".[]" 2>/dev/null
+    else
+     local jj='{"'"$1"'":.'"$1"
+     shift
+     while [ ! -z "$1" ]
+        do
+         jj="$jj"',"'"$1"'":.'"$1"
+         shift
+     done
+     jj="$jj"'}'
+     __META_qbrequest "torrents/info?hashes=$QBhash" | jq ".[]|$jj" 2>/dev/null
+fi
+return 0
+}
+
+
+# qbtormenu: Get editable properties of the selected torrent, or print all editable properties
+# Usage: qbtormenu [(-r VAR | VAR_1 [VAR_2 ...])]
+# qbtormenu: The option "-r" is for the raw output of a property
+alias qbtormenu="__META_qbcall qbtormenu"
+function __META_qbtormenu ()
+{
+if [ -z "$QBhash" ]
+    then
+     >&2 echo 'No selected torrent'
+     return 1
+fi
+local vars='{"save_path":.save_path,"name":.name,"category":.category,tags:.tags,"auto_tmm":.auto_tmm,"dl_limit_kbs":(.dl_limit|if .>0 then (./1024|trunc) else . end),"up_limit_kbs":(.up_limit|if .>0 then (./1024|trunc) else . end),"share_limit":{"ratio_limit":.ratio_limit,"seeding_time_limit":.seeding_time_limit},"super_seeding":.super_seeding,"media":{"seq_dl":.seq_dl,"f_l_piece_prio":.f_l_piece_prio}}'
+if [ "$1" == "-r" ]
+    then
+     if [ -z "$2" ] || [ $# -gt 2 ]
+        then
+         >&2 qbhelp -u qbtormenu
+         return 127
+     fi
+     __META_qbrequest "torrents/info?hashes=$QBhash" | jq -r ".[]|$vars|.$2" 2>/dev/null
+     return 0
+fi
+if [ -z "$1" ]
+    then
+     __META_qbrequest "torrents/info?hashes=$QBhash" | jq ".[]|$vars" 2>/dev/null
+    else
+     local jj='{"'"$1"'":.'"$1"
+     shift
+     while [ ! -z "$1" ]
+        do
+         jj="$jj"',"'"$1"'":.'"$1"
+         shift
+     done
+     jj="$jj"'}'
+     __META_qbrequest "torrents/info?hashes=$QBhash" 2>/dev/null | jq ".[]|$vars|$jj" 2>/dev/null
+fi
+return 0
+}
+
+
+# qbtormenuedit: Change an editable property of the selected torrent
+# Usage: qbtormenuedit PROPERTY VALUE # if the PROPERTY is a single-valued
+# Usage:qbtormenuedit Usage: qbtormenuedit PROPERTY VALUE_1 VALUE_2 ... # if the PROPERTY is a multi-valued object
+## Usage:qbtormenuedit Usage: qbtormenuedit priority (top|increase|decrease|bottom)
+# Usage:qbtormenuedit Usage: qbtormenuedit tags [-d] TAG # add or delete("-d") the TAG
+
+alias qbtormenuedit="__META_qbcall qbtormenuedit"
+function __META_qbtormenuedit ()
+{
+if [ -z "$QBhash"  ]
+then
+>&2 echo 'No selected torrent'
+return 1
+fi
+if [ "$#" -lt 2 ]
+then
+>&2 qbhelp -u qbtormenuedit
+return 127
+fi
+local resp=""
+case "$1" in
+    save_path)
+     resp=$(echo $2|jq -rR '@uri')
+     resp=$(__META_qbrequest -e "torrents/setLocation?hashes=$QBhash&location=$resp")
+    ;;
+    name)
+     resp=$(echo $2|jq -rR '@uri')
+     resp=$(__META_qbrequest -e "torrents/rename?hash=$QBhash&name=$resp")
+    ;;
+    category)
+     resp=$(echo $2|jq -rR '@uri')
+     resp=$(__META_qbrequest -e "torrents/setCategory?hashes=$QBhash&category=$resp")
+    ;;
+    tags)
+     if [ "$2" == "-d" ]
+        then
+         [ -z "$3" ] && { >&2 qbhelp -u qbtormenuedit; return 127; }
+         resp=$(echo $3|jq -rR '@uri')
+         resp=$(__META_qbrequest -e "torrents/removeTags?hashes=$QBhash&tags=$resp")
+        else
+         resp=$(echo $2|jq -rR '@uri')
+         resp=$(__META_qbrequest -e "torrents/addTags?hashes=$QBhash&tags=$resp")
+     fi
+    ;;
+    auto_tmm)
+     resp=$(__META_qbrequest -e "torrents/setAutoManagement?hashes=$QBhash&enable=$2")
+    ;;
+    dl_limit_kbs)
+     resp=$(jq -rn "$2|if .<0 then -1 else .*1024 end" 2>/dev/null)
+     [ -z "$resp" ] || resp=$(__META_qbrequest -e "torrents/setDownloadLimit?hashes=$QBhash&limit=$resp")
+    ;;
+    up_limit_kbs)
+     resp=$(jq -rn "$2|if .<0 then -1 else .*1024 end" 2>/dev/null)
+     [ -z "$resp" ] || resp=$(__META_qbrequest -e "torrents/setUploadLimit?hashes=$QBhash&limit=$resp")
+    ;;
+    share_limit)
+     [ -z "$3" ] && { >&2 qbhelp -u qbtormenuedit; return 127; }
+     resp=$(__META_qbrequest -e "torrents/setShareLimits?hashes=$QBhash&ratioLimit=$2&seedingTimeLimit=$3")
+    ;;
+    super_seeding)
+     resp=$(__META_qbrequest -e "torrents/setSuperSeeding?hashes=$QBhash&value=$2")
+    ;;
+    media)
+     [ -z "$3" ] && { >&2 qbhelp -u qbtormenuedit; return 127; }
+     local oldval=$(__META_qbrequest "torrents/info?hashes=$QBhash" | jq -rc '.[] | [ .seq_dl, .f_l_piece_prio ]' 2>/dev/null)
+     if [ -z "$oldval" ]
+        then
+         >&2 echo 'An error is occured'
+         return 1
+     fi
+     local oldse=$(echo "$oldval" | jq -r '.[0]' 2>/dev/null)
+     local oldfl=$(echo "$oldval" | jq -r '.[1]' 2>/dev/null)
+     if [ "$2" == "$oldse" ]
+        then
+         resp=200
+        else
+         resp=$(__META_qbrequest -e "torrents/toggleSequentialDownload?hashes=$QBhash")
+     fi
+     if [ "$resp" == "200" ] && [ "$3" != "$oldfl" ]
+        then
+         resp=$(__META_qbrequest -e "torrents/toggleFirstLastPiecePrio?hashes=$QBhash")
+     fi
+    ;;
+    #priority)
+    # resp=$(__META_qbrequest -e "torrents/${2}Prio?hashes=$QBhash")
+    #;;
+    *)
+     >&2 qbhelp -u qbtormenuedit
+     return 127
+    ;;
+esac
+if [ "$resp" != "200" ]
+    then
+     >&2 echo 'An error is occured'
+     return 1
+fi
+return 0
+}
+
+# qbtorblock: Scaled piece states string
+# Usage: qbtorblock [-n [NUMBER_OF_BLOCKS]] [(-o FILE_INDEX | -i FILE_INDEX1 [FILE_INDEX2])]
+# qbtorblock: Print a fixed number of symbols showing the state of pieces blocks of the selected torrent.
+# qbtorblock: Without the "-n" options the number of blocks equals to $COLUMNS (of the current terminal).
+# qbtorblock: If the option "-n" is present then the default number equals to the number of pieces of the torrent (so block=piece). 
+# qbtorblock: The meaning of symbols:
+# qbtorblock: "#" - completely downloaded block
+# qbtorblock: "+" - partially downloaded block
+# qbtorblock: "v" - downloading block
+# qbtorblock: "-" - not downloaded (empty) block
+# qbtorblock: The option "-o" specifies the index of a file, whose only pieces will be shown.
+# qbtorblock: The option "-i" specifies the qbtorcontent interval of file indices (alphabetical and generic) whose pieces will be shown among other pieces. The pieces of files outside the interval will be marked by the dot (".")
+# qbtorblock: See "qbtorcontent --help" for a more info on generic and alphabetical indices
+
+alias qbtorblock="__META_qbcall qbtorblock"
+function __META_qbtorblock ()
+{
+if [ -z "$QBhash" ]
+    then
+     >&2 echo 'No selected torrent'
+     return 1
+fi
+local aone="$COLUMNS"
+if [ "$1" == "-n" ]
+    then
+     if [ "x${2:0:1}" == "x-" ]
+        then
+         aone=""
+        else
+         aone="$2"
+         shift
+     fi
+     shift
+fi
+if [ "$1" == "-o" ]
+    then
+     if [ -z "$2" ]
+        then
+         >&2 qbhelp -u qbtorblock
+         return 127
+     fi
+     local arg2="$2"
+     local sort=""
+     if [ "${arg2:0:1}" == "[" ]
+        then
+         if [ "${arg2:$((${#arg2}-1)):1}" != "]" ]
+         #|| [ "${arg2:0:1}" != "[" ] || [ "${arg2:$((${#arg2}-1)):1}" != "]" ]
+                then
+                 >&2 qbhelp -u qbtorblock
+                 return 127
+         fi
+         arg2="${arg2:1:$((${#arg2}-2))}"
+        else
+         sort="sort_by(.name)|"
+     fi
+     local pi=$(__META_qbrequest "torrents/files?hash=$QBhash" |
+     jq --arg i "$arg2" "$sort"'.[($i|tonumber)].piece_range' 2>/dev/null)
+     if [ -z "$aone" ]
+        then
+         __META_qbrequest "torrents/pieceStates?hash=$QBhash" |
+         jq -r --argjson pi "$pi" '.[$pi|.[0]:($pi|.[1])+1]|[.[]|if .==0 then "-" else if .==1 then "v" else if .==2 then "#" else "." end end end]|add' 2>/dev/null
+        else
+         __META_qbrequest "torrents/pieceStates?hash=$QBhash" |
+         jq -r --argjson pi "$pi" --arg aone "$aone" '.[$pi|.[0]:($pi|.[1])+1]|
+         length as $len|($aone|tonumber) as $size|(-(-$size/$len|floor)) as $mult|[.[] as $n|(range($mult)|$n)]|
+         [to_entries |[.[]|{"a":(.key*$size/($len*$mult)|trunc),"b":.value}]|group_by(.a)|.[]|[.[].b]|
+         reduce .[] as $n (4;if .==4 then if $n==0 then 0 else $n+1 end else if $n==1 then 2 else if (.==3 and $n==0) or (.==0 and $n==2) then 1 else . end end end)|
+         if .==0 then "-" else if .==1 then "+" else if .==2 then "v" else if .==3 then "#" else "." end end end end]|add' 2>/dev/null
+     fi
+    else
+     if [ "$1" == "-i" ]
+        then
+         if [ -z "$2" ]
+            then
+             >&2 qbhelp -u qbtorblock
+             return 127
+         fi
+         local arg2="$2"
+         local arg3="$3"
+         local sort="."
+         if [ -z $arg3 ]
+            then
+             arg3="$2"
+         fi
+         if [ "${arg2:0:1}" == "[" ]
+            then
+             if [ "${arg2:$((${#arg2}-1)):1}" != "]" ] || [ "${arg3:0:1}" != "[" ] || [ "${arg3:$((${#arg3}-1)):1}" != "]" ]
+                then
+                 >&2 qbhelp -u qbtorblock
+                 return 127
+         fi
+         arg2="${arg2:1:$((${#arg2}-2))}"
+         arg3="${arg3:1:$((${#arg3}-2))}"
+        else
+         sort="sort_by(.name)"
+     fi
+         pi=$(__META_qbrequest "torrents/files?hash=$QBhash" |
+         jq -c --arg i "$arg2" --arg j "$arg3" "$sort"' as $inp|reduce range($i|tonumber;($j|tonumber)+1) as $n ([];.+[($inp|.[$n]).piece_range|range(.[0];.[1]+1)]|unique)' 2>/dev/null)
+         if [ -z "$aone" ]
+            then
+             __META_qbrequest "torrents/pieceStates?hash=$QBhash" |
+             jq -r --argjson pi "$pi" '. as $inp|length as $len| [range($len)| . as $i|if ($pi|index($i))==null then 3 else ($inp|.[$i]) end|
+             if .==0 then "-" else if .==1 then "v" else if .==2 then "#" else "." end end end]|add' 2>/dev/null
+            else
+             __META_qbrequest "torrents/pieceStates?hash=$QBhash" |
+             jq -r --argjson pi "$pi" --arg aone "$aone" '. as $inp|length as $len|($aone|tonumber) as $size|(-(-$size/$len|floor)) as $mult|
+             [range($len)| . as $i|if ($pi|index($i))==null then 3 else ($inp|.[$i]) end]|
+             [.[] as $n|(range($mult)|$n)]|
+             [to_entries |[.[]|{"a":(.key*$size/($len*$mult)|trunc),"b":.value}]|group_by(.a)|.[]|[.[].b]|
+             reduce .[] as $n (4;if .==4 then if $n==0 then 0 else $n+1 end else if $n==1 then 2 else if (.==3 and $n==0) or (.==0 and $n==2) then 1 else . end end end)|
+             if .==0 then "-" else if .==1 then "+" else if .==2 then "v" else if .==3 then "#" else "." end end end end]|add' 2>/dev/null
+        fi
+        else
+         if [ -z "$aone" ]
+            then
+             __META_qbrequest "torrents/pieceStates?hash=$QBhash" |
+             jq -r '[.[]|
+             if .==0 then "-" else if .==1 then "v" else if .==2 then "#" else "." end end end]|add' 2>/dev/null
+            else
+             __META_qbrequest "torrents/pieceStates?hash=$QBhash" |
+             jq -r --arg aone "$aone" 'length as $len|($aone|tonumber) as $size|(-(-$size/$len|floor)) as $mult|[.[] as $n|(range($mult)|$n)]|
+             [to_entries |[.[]|{"a":(.key*$size/($len*$mult)|trunc),"b":.value}]|group_by(.a)|.[]|[.[].b]|
+             reduce .[] as $n (4;if .==4 then if $n==0 then 0 else $n+1 end else if $n==1 then 2 else if (.==3 and $n==0) or (.==0 and $n==2) then 1 else . end end end)|
+             if .==0 then "-" else if .==1 then "+" else if .==2 then "v" else if .==3 then "#" else "." end end end end]|add' 2>/dev/null
+         fi
+     fi
+fi
+return 0
+}
+
+# qbtorgeneral: Get the specified general properties of the selected torrent, or print all of them
+# Usage: qbtorgeneral [(-r GEN_PROPERTY | GEN_PROPERTY_1 [GEN_PROPERTY_2 ...])]
+
+alias qbtorgeneral="__META_qbcall qbtorgeneral"
+function __META_qbtorgeneral ()
+{
+if [ -z "$QBhash" ]
+    then
+     >&2 echo 'No selected torrent'
+     return 1
+fi
+if [ "$1" == "-r" ]
+    then
+     if [ -z "$2" ] || [ $# -gt 2 ]
+        then
+         >&2 qbhelp -u qbtorgeneral
+         return 127
+     fi
+     __META_qbrequest "torrents/properties?hash=$QBhash" | jq -r ".$2" 2>/dev/null
+     return 0
+fi
+if [ -z "$1" ]
+    then
+     __META_qbrequest "torrents/properties?hash=$QBhash" | jq 2>/dev/null
+    else
+     local jj='{"'"$1"'":.'"$1"
+     shift
+     while [ ! -z "$1" ]
+        do
+         jj="$jj"',"'"$1"'":.'"$1"
+         shift
+     done
+     jj="$jj"'}'
+     __META_qbrequest "torrents/properties?hash=$QBhash" | jq "$jj" 2>/dev/null
+fi
+return 0
+}
+
+# qbtortrack: Trackers and web seeds info of the selected torrent
+# Usage: qbtortrack
+
+alias qbtortrack="__META_qbcall qbtortrack"
+function __META_qbtortrack ()
+{
+if [ -z "$QBhash" ]
+then
+>&2 echo 'No selected torrent'
+return 1
+fi
+__META_qbrequest "torrents/trackers?hash=$QBhash" |
+jq '.[]|.url+" ("+
+(.status|if .==0 then "Disabled" else if .==1 then "Not contacted" else if .==2 then "Working" else if .==3 then "Updating" else "Not working" end end end end)+
+"), p:"+(.num_peers|tostring)+" s:"+(.num_seeds|tostring)+" l:"+(.num_leeches|tostring)' 2>/dev/null
+__META_qbrequest "torrents/webseeds?hash=$QBhash" | jq '.[]|.url+" (web seed)"' 2>/dev/null
+}
+
+# qbtortrackedit: Edit trackers of the selected torrent
+# Usage: qbtortrackedit (-d URL | URL_1 [URL_2])
+# qbtortrackedit: Options:
+# qbtortrackedit: -d URL - Delete the tracker URL
+# qbtortrackedit:  URL_1 [URL_2] - Add the tracker URL_1, or replace URL_2 by URL_1
+
+alias qbtortrackedit="__META_qbcall qbtortrackedit"
+function __META_qbtortrackedit ()
+{
+local resp
+local url1=$(echo "$1"|jq -rR '@uri')
+local url2=$(echo "$2"|jq -rR '@uri')
+if [ -z "$QBhash" ]
+    then
+     >&2 echo 'No selected torrent'
+     return 1
+fi
+if [ -z "$1" ]
+    then
+     >&2 qbhelp -u qbtortrackedit
+     return 127
+fi
+if [ "$1" == "-d" ]
+    then
+     if [ -z "$2" ]
+      then
+       >&2 qbhelp -u qbtortrackedit
+       return 127
+      else
+       resp=$(__META_qbrequest -e "torrents/removeTrackers?hash=$QBhash&urls=$url2")
+     fi
+    else
+     if [ -z "$2" ]
+        then
+         resp=$(__META_qbrequest -e "torrents/addTrackers?hash=$QBhash&urls=$url1")
+        else
+         resp=$(__META_qbrequest -e "torrents/editTracker?hash=$QBhash&origUrl=$url2&newUrl=$url1")
+     fi
+fi
+if [ "$resp" != 200 ]
+    then
+     >&2 echo 'An error is occured'
+     return 1
+fi
+return 0
+}
+
+# qbtorpeer: List of connected peers of the selected torrent with a short info
+# Usage: qbtorpeer [-r] [--jqselect FILTER] [--jqsort FILTER] [--jq FORMAT]
+# qbtorpeer: Option -r: raw output
+# qbtorpeer: Advanced options: --jqselect and --jqsort for inserting "select" and "sort_by" jq-filters. E.g,
+# qbtorpeer: qbtorpeer --jqselect '(.progress>0)' --jqsort '(.dl_speed)'
+# qbtorpeer: The default --jqsort value is '(.progress)'
+# qbtorpeer: Advanced option: --jq enables a possibility to define an own jq-format for output  lines. E.g.,
+# qbtorpeer: qbtorpeer --jqsort '(.progress)|reverse' --jq '.ip+":"+(.port|tostring)'
+# qbtorpeer: The default format of qbtorcontent is defined in the variable
+# qbtorpeer: QBtorpeerjq='(.progress*100 | trunc | tostring)+"% "+.ip+" "+.country_code+" "+(.dl_speed /1024 |trunc|tostring)+"Kb/s "+.client+"("+.connection+")"'
+# qbtorpeer: The available fields: .client,.connection,.country,.country_code,.dl_speed,.downloaded,.files,.flags,.flags_desc,.ip,.port,.progress,.relevance,.up_speed,.uploaded
+
+alias qbtorpeer="__META_qbcall qbtorpeer"
+function __META_qbtorpeer ()
+{
+if [ -z "$QBhash" ]
+    then
+     >&2 echo 'No selected torrent'
+     return 1
+fi
+local rawar=()
+if  [ "$1" == "-r" ]
+    then
+     rawar=('-r')
+     shift
+    else
+     rawar=()
+fi
+local selectfilter=""
+if [ "$1" == "--jqselect" ]
+    then
+     [ -z "$2" ] && { >&2 qbhelp -u qbtorcontent; return 127; }
+     selectfilter="|select$2"
+     shift
+     shift
+fi
+local sortfilter=""
+if [ "$1" == "--jqsort" ]
+    then
+     [ -z "$2" ] && { >&2 qbhelp -u qbtorcontent; return 127; }
+     sortfilter="|sort_by$2"
+     shift
+     shift
+    else
+     sortfilter="|sort_by(.progress)"
+fi
+local filter=""
+if [ "$1" == "--jq" ]
+    then
+     [ -z "$2" ] && { >&2 qbhelp -u qbtorcontent; return 127; }
+     filter="$2"
+     shift
+     shift
+    else
+     filter="$QBtorpeerjq"
+fi
+if [ ! -z "$1" ]
+    then
+     >&2 qbhelp -u qbtorpeer
+     return 127
+fi
+__META_qbrequest "sync/torrentPeers?hash=$QBhash"| jq "${rawar[@]}" "[.peers | .[]$selectfilter]$sortfilter|.[]|$filter" 2>/dev/null
+}
+
+# qbtorpeeradd: Add a peer
+# Usage: qbtorpeeradd PEER
+
+alias qbtorpeeradd="__META_qbcall qbtorpeeradd"
+function __META_qbtorpeeradd ()
+{
+if [ -z "$QBhash" ]
+    then
+     >&2 echo 'No selected torrent'
+     return 1
+fi
+if [ -z "$1" ]
+    then
+     >&2 qbhelp -u qbtorpeeradd
+     return 127
+fi
+local resp=$(echo "$1"|jq -rR '@uri')
+resp=$(__META_qbrequest -e "torrents/addPeers?hashes=$QBhash&peers=$resp" 2>/dev/null)
+if [ "$resp" != "200" ]
+    then
+     if [ "$resp" == 400 ]
+        then
+         >&2 echo 'The peer is not valid'
+        else
+         >&2 echo 'An error is occured'
+     fi
+     return 1
+fi
+return 0
+}
+
+# qbtorcontent: Alphabetically sorted list of the names and priorities of files of the selected torrent with a short info
+# Usage: qbtorcontent [--jqselect FILTER] [--jqsort FILTER] [--jq FORMAT] [INDEX_1] [INDEX_2]
+# qbtorcontent: Without option print info of all files together with their alphabetical (0,1,2,...) and generic ([0],[1],[2]...) indices
+# qbtorcontent: The generic indices do not depend on renaming of files, they are shown in square brackets.
+# qbtorcontent: The alphabetical indices depend on the names, but they may be more convenient than generic ones.
+# qbtorcontent: E.g., the record "3[1]. /Folder/file2 ..."  means that the generic index of file2 is [1], while its alphabetical index is 3.
+# qbtorcontent: Arguments INDEX_1 and INDEX_2 are either alphabetical (without brackets), or generic (in square brackets) indices of the same type. They determine an interval of files to be shown
+# qbtorcontent: Advanced options: --jqselect and --jqsort for inserting "select" and "sort_by" jq-filters
+# qbtorcontent: E.g., qbtorcontent --jqselect '(.priority==7)' --jqsort '(.progress)|reverse'
+# qbtorcontent: Advanced option: --jq enables a possibility to define an own jq-format for output lines
+# qbtorcontent: E.g., qbtorcontent --jqsort '(.gen_index)' --jq '"["+(.gen_index|tostring)+"] "+.name'
+# qbtorcontent: The default format of qbtorcontent is defined in the variable
+# qbtorcontent: QBtorcontentjq='(.alph_index|tostring)+"["+(.gen_index|tostring)+"]. "+.name+" <prio:"+(.priority|tostring)+">, "+(.progress*100|trunc|tostring)+"% of "+(.size /1048576|trunc|tostring)+"Mb, "+(.availability*100|trunc|tostring)+"% online"'
+
+
+alias qbtorcontent="__META_qbcall qbtorcontent"
+function __META_qbtorcontent ()
+{
+if [ -z "$QBhash" ]
+    then
+     >&2 echo 'No selected torrent'
+     return 1
+fi
+local rawar=()
+if  [ "$1" == "-r" ]
+    then
+     rawar=('-r')
+     shift
+    else
+     rawar=()
+fi
+local selectfilter=""
+if [ "$1" == "--jqselect" ]
+    then
+     [ -z "$2" ] && { >&2 qbhelp -u qbtorcontent; return 127; }
+     selectfilter="|select$2"
+     shift
+     shift
+fi
+local sortfilter=""
+if [ "$1" == "--jqsort" ]
+    then
+     [ -z "$2" ] && { >&2 qbhelp -u qbtorcontent; return 127; }
+     sortfilter="|sort_by$2"
+     shift
+     shift
+fi
+local filter=""
+if [ "$1" == "--jq" ]
+    then
+     [ -z "$2" ] && { >&2 qbhelp -u qbtorcontent; return 127; }
+     filter="$2"
+     shift
+     shift
+    else
+     filter="$QBtorcontentjq"
+fi
+local arg2
+local globfilter='to_entries| sort_by(.value.name)|to_entries|.[]|{"alph_index":.key}+{"gen_index":.value.key}+.value.value'
+local indexfilter=""
+if [ ! -z "$1" ]
+    then
+     local arg1="$1"
+     local arg2=""
+     if [ -z $2 ]
+        then arg2="$1"
+        else arg2="$2"
+     fi
+     local indexfilter=""
+     if [ "${arg1:0:1}" == "[" ]
+        then
+         if [ "${arg1:$((${#arg1}-1)):1}" != "]" ] || [ "${arg2:0:1}" != "[" ] || [ "${arg2:$((${#arg2}-1)):1}" != "]" ]
+                then
+                 >&2 qbhelp -u qbtorcontent
+                 return 127
+         fi
+         arg1="${arg1:1:$((${#arg1}-2))}"
+         arg2="${arg2:1:$((${#arg2}-2))}"
+         indexfilter="|select(.gen_index==$arg1 or (.gen_index>$arg1 and .gen_index<=$arg2))"
+        else
+         indexfilter="|select(.alph_index==$arg1 or (.alph_index>$arg1 and .alph_index<=$arg2))"
+     fi
+fi
+__META_qbrequest "torrents/files?hash=$QBhash" | jq "${rawar[@]}" "[$globfilter$indexfilter$selectfilter]$sortfilter|.[]|$filter" 2>/dev/null
+}
+
+# qbtorcontentedit: Change the names and priorities of files of the selected torrent
+# Usage: qbtorcontentedit filename NEW_NAME INDEX [OFFSET]
+# qbtorcontentedit: rename the file with INDEX
+# qbtorcontentedit: OFFSET is the number of directory levels up for the new name of the file (default=1)
+# Usage:qbtorcontentedit Usage: qbtorcontentedit dirname NEW_NAME [INDEX] [DIR_INDEX] [OFFSET]
+# qbtorcontentedit: rename a directory in the path of the file with INDEX
+# qbtorcontentedit: DIR_INDEX is the number of directory levels from the file to the targeted directory (default=1)
+# qbtorcontentedit: OFFSET is the number of directory levels up for the new name of the directory (default=1)
+# Usage:qbtorcontentedit Usage: qbtorcontentedit prio NEW_PRIORITY [INDEX_1] [INDEX_2]
+# qbtorcontentedit: qbtorcontentedit prio without arguments INDEX_1 and INDEX_2 does a global change of file priorities
+# qbtorcontentedit: qbtorcontentedit prio with arguments INDEX_1 INDEX_2 sets a new priority to the files in the specified interval, the same as in qbcontent
+# qbtorcontentedit: See "qbcontent --help" for more info on generic and alphabetical indices
+
+alias qbtorcontentedit="__META_qbcall qbtorcontentedit"
+function __META_qbtorcontentedit ()
+{
+if [ -z "$QBhash" ]
+    then
+     >&2 echo 'No selected torrent'
+     return 1
+fi
+local level="1"
+local dirlevel="1"
+local gen=""
+local resp=""
+local oldname=""
+local path=""
+local index=""
+case "$1" in
+    filename)
+     if [ "$#" -lt 3 ]
+        then
+         >&2 qbhelp -u qbtorcontentedit
+         return 127
+     fi
+     resp=$(__META_qbrequest "torrents/files?hash=$QBhash" 2>/dev/null)
+     if [ "${3:0:1}" == "[" ]
+        then
+         [ "${3:$((${#3}-1)):1}" == "]" ] || {>&2 qbhelp -u qbtorcontentedit; return 127; }
+         index="${3:1:$((${#3}-2))}"
+         oldname=$(echo "$resp"| jq -r '.['"$index"'].name' 2>/dev/null)
+         gen="$index"
+        else
+         index="$3"
+         resp=$(echo "$resp"| jq 'to_entries|sort_by(.value.name)|.['"$index"']|{"gen_index":.key,"name":.value.name}' 2>/dev/null)
+         oldname=$(echo "$resp"| jq -r '.name' 2>/dev/null)
+         gen=$(echo "$resp"| jq -r '.gen_index' 2>/dev/null)
+     fi
+     if [ -z "$oldname" ]
+        then
+         >&2 echo 'An error is occured'
+         return 1
+     fi
+     resp=$(echo "$2"|jq -rR '@uri')
+     [ -n "$4" ] && [ "$4" -gt "1" ] && level="$4" 2>/dev/null
+     path="$oldname"
+     while [ "$level" -ge  "1" ]
+        do
+         if [ "$path" == "." ]
+            then
+             >&2 echo 'An error is occured'
+             return 1
+         fi
+         path=$(dirname "$path")
+         level=$((level-1))
+        done
+     if [ "$path" == "." ]
+        then
+         path=""
+        else
+         path=$(echo "$path/"| jq -rR '@uri')
+     fi
+     oldname=$(echo "$oldname"| jq -rR '@uri')
+     resp=$(__META_qbrequest -e "torrents/renameFile?hash=$QBhash&oldPath=$oldname&newPath=$path$resp" 2>/dev/null)
+     if [ "$resp" != "200" ]
+        then
+         >&2 echo 'An error is occured'
+         return 1
+     fi
+     echo "File [$gen] was renamed"
+     return 0
+    ;;
+    dirname)
+     if [ "$#" -lt 3 ]
+        then
+         >&2 qbhelp -u qbtorcontentedit
+         return 127
+     fi
+     resp=$(__META_qbrequest "torrents/files?hash=$QBhash" 2>/dev/null)
+     if [ "${3:0:1}" == "[" ]
+        then
+         [ "${3:$((${#3}-1)):1}" == "]" ] || {>&2 qbhelp -u qbtorcontentedit; return 127; }
+         index="${3:1:$((${#3}-2))}"
+         oldname=$(echo "$resp"| jq -r '.['"$index"'].name' 2>/dev/null)
+        else
+         index="$3"
+         oldname=$(echo "$resp"| jq -r 'to_entries|sort_by(.value.name)|.['"$index"']|.value.name' 2>/dev/null)
+     fi
+     if [ -z "$oldname" ]
+        then
+         >&2 echo 'An error is occured'
+         return 1
+     fi
+     resp=$(echo "$2"|jq -rR '@uri')
+     [ -n "$4" ] && [ "$4" -gt "1" ] && dirlevel="$4" 2>/dev/null
+     while [ "$dirlevel" -ge  "1" ]
+        do
+         if [ "$oldname" == "." ]
+            then
+             >&2 echo 'An error is occured'
+             return 1
+         fi
+         oldname=$(dirname "$oldname")
+         dirlevel=$((dirlevel-1))
+        done
+     path="$oldname"
+     [ -n "$5" ] && [ "$5" -gt "1" ] && level="$5" 2>/dev/null
+     while [ "$level" -ge  "1" ]
+        do
+         if [ "$path" == "." ]
+            then
+             >&2 echo 'An error is occured'
+             return 1
+         fi
+         path=$(dirname "$path")
+         level=$((level-1))
+        done
+     if [ "$path" == "." ]
+        then
+         path=""
+        else
+         path=$(echo "$path/"| jq -rR '@uri')
+     fi
+     oldname=$(echo "$oldname"| jq -rR '@uri')
+     resp=$(__META_qbrequest -e "torrents/renameFolder?hash=$QBhash&oldPath=$oldname&newPath=$path$resp" 2>/dev/null)
+     if [ "$resp" != "200" ]
+        then
+         >&2 echo 'An error is occured'
+         return 1
+     fi
+     echo "Folder was renamed"
+     return 0
+     ;;
+    prio)
+     if [ "$#" -lt 2 ]
+        then
+         >&2 qbhelp -u qbtorcontentedit
+         return 127
+     fi
+     index=""
+     local arg3="$3"
+     local arg4=""
+     if [ -z "$3" ]
+        then
+         index=$(__META_qbrequest "torrents/files?hash=$QBhash" | jq -r '["0"]+[range(1;length)|tostring|"|"+.]|add' 2>/dev/null)
+        else
+         if [ -z $4 ]
+            then
+             arg4="$3"
+            else
+             arg4="$4"
+         fi
+         if [ "${arg3:0:1}" == "[" ]
+            then
+             if [ "${arg3:$((${#arg3}-1)):1}" != "]" ] || [ "${arg4:0:1}" != "[" ] || [ "${arg4:$((${#arg4}-1)):1}" != "]" ]
+                then
+                 >&2 qbhelp -u qbtorcontentedit
+                 return 127
+             fi
+             arg3="${arg3:1:$((${#arg3}-2))}"
+             arg4="${arg4:1:$((${#arg4}-2))}"
+             index=$(jq -nr '["'"$arg3"'"]+[range('"$arg3"'+1;'"$arg4"'+1)|tostring|"|"+.]|add' 2>/dev/null)
+            else
+             index=$(__META_qbrequest "torrents/files?hash=$QBhash" 2>/dev/null |
+             jq -r '[ .[] | .name ] | to_entries | sort_by(.value) | [(.['"$3"'].key|tostring)]+ [.['"$3"'+1:'"$arg4"'+1] | "|"+(.[].key|tostring)]|add' 2>/dev/null)
+         fi
+     fi
+     if [ -z "$index" ]
+        then
+         >&2 echo 'An error is occured'
+         return 1
+     fi
+     resp=$(__META_qbrequest -e "torrents/filePrio?hash=$QBhash&id=$index&priority=$2" 2>/dev/null)
+     if [ "$resp" == "200" ]
+        then
+         echo "New priority was sent"
+         return 0
+        else
+         #TODO: add the exitcodes 400, 404,409
+         >&2 echo 'An error is occured'
+         return 1
+     fi
+    ;;
+    *)
+     >&2 qbhelp -u qbtorcontentedit
+     return 127
+    ;;
+esac
+}
+
+# qbtorfile: Get the full info of the specified file of the selected torrent
+# Usage: qbtorfile INDEX [(-r PROPERTY | PROPERTY_1 [PROPERTY_2 ...])]
+# qbtorfile: INDEX can be either alphabetic or generic
+# qbtorfile: For example, "qbtorfile [n] -r alph_index" gives the alphabetic index of the generic index [n], while "qbtorfile n -r gen_index" does the reverse transformation
+# qbtorfile: Try "qbtorcontent --help" for a more info on generic and alphabetical indices
+
+alias qbtorfile="__META_qbcall qbtorfile"
+function __META_qbtorfile ()
+{
+if [ -z "$QBhash" ]
+    then
+     >&2 echo 'No selected torrent'
+     return 1
+fi
+if [ -z "$1" ]
+    then
+     >&2 qbhelp -u qbtorfile
+     return 127
+fi
+local globfilter='to_entries| sort_by(.value.name)|to_entries|.[]|{"alph_index":.key}+{"gen_index":.value.key}+.value.value'
+local indexfilter=""
+if [ "${1:0:1}" == "[" ]
+    then
+     [ "${1:$((${#1}-1)):1}" == "]" ] || {>&2 qbhelp -u qbtorfile; return 127; }
+     indexfilter="select(.gen_index==${1:1:$((${#1}-2))})"
+    else
+     indexfilter="select(.alph_index==$1)"
+fi
+if [ "$2" == "-r" ]
+    then
+     if [ -z "$3" ] || [ "$#" -gt 3 ]
+        then
+         >&2 qbhelp -u qbtorfile
+         return 127
+     fi
+     __META_qbrequest "torrents/files?hash=$QBhash" | jq -rc "$globfilter|$indexfilter|.$3" 2>/dev/null
+     return 0
+fi
+if [ -z "$2" ]
+    then
+     __META_qbrequest "torrents/files?hash=$QBhash" | jq "$globfilter|$indexfilter" 2>/dev/null
+    else
+     shift
+     local jj='{"'"$1"'":.'"$1"
+     shift
+     while [ ! -z "$1" ]
+        do
+         jj="$jj"',"'"$1"'":.'"$1"
+         shift
+     done
+     jj="$jj"'}'
+     __META_qbrequest "torrents/files?hash=$QBhash" | jq "$globfilter|$indexfilter|$jj" 2>/dev/null
+fi
+return 0
+}
+
+
+##########################################################################################
+#The initialization
+##########################################################################################
+
+trap '[ -z "$QBcookie" ] && exit' SIGINT
+shopt -s expand_aliases
+HISTFILE="$HOME/.qbc_history"
+HISTCONTROL="ignoreboth:erasedups"
+PROMPT_COMMAND='history -n; history -w; history -c; history -r; PS1=\$QBurlshort"/"\${QBhash:0:5}"> "'
+QBarg=()
+QBlogin="admin"
+QBpassword=""
+QBurlshort="$QB_url"
+QBurl="$QB_url"
+unset QB_url
+QBversion="$QB_version"
+unset QB_version
+QBhelpfile="$BASH_ENV"
+unset BASH_ENV
+
+[ -f "$HOME/.qbcrc" ] && . "$HOME/.qbcrc"
+[ -z "$QB_arg1" ] || QBarg=("$QB_arg1")
+[ -z "$QB_arg2" ] || QBarg+=("$QB_arg2")
+unset QB_arg1
+unset QB_arg2
+[ -z "$QB_login" ] || QBlogin="$QB_login"
+unset QB_login
+[ -z "$QB_password" ] || QBpassword="$QB_password"
+unset QB_password
+
+QBlogin=$(echo "$QBlogin" | jq  -rR @uri)
+QBpassword=$(echo "$QBpassword" | jq  -rR @uri)
+__META_qblogin
+exitcode=$?
+[ "$exitcode" == "0" ] || builtin exit "$exitcode"
+unset exitcode
+if [ -z "$QBlistjq" ]
+    then
+     if [ $(qbpref -r queueing_enabled) == "true" ]
+        then
+         QBlistjq='(.index|tostring)+". <"+(.priority|tostring)+"> "+.name+", "+(.progress*100|trunc|tostring)+"% of "+(.size /1048576|trunc|tostring)+"Mb, state:"+.state'
+        else
+         QBlistjq='(.index|tostring)+". "+.name+", "+(.progress*100|trunc|tostring)+"% of "+(.size /1048576|trunc|tostring)+"Mb, state:"+.state'
+     fi
+     [ $(qbpref -r queueing_enabled) == "true" ] && QBlistjq="$QBlistjq"'+", priority:"+(.priority|tostring)'
+fi
+[ -z "$QBselectjq" ] && QBselectjq='.name+", "+(.progress*100|trunc|tostring)+"% of "+(.size /1048576|trunc|tostring)+"Mb, "+.state+", "+(.dlspeed/1024|trunc|tostring)+" Kb/s"'
+[ -z "$QBtorpeerjq" ] && QBtorpeerjq='(.progress*100 | trunc | tostring)+"% "+.ip+" "+.country_code+" "+(.dl_speed /1024 |trunc|tostring)+"Kb/s "+.client+"("+.connection+")"'
+[ -z "$QBtorcontentjq" ] && QBtorcontentjq='(.alph_index|tostring)+"["+(.gen_index|tostring)+"]. "+.name+" <prio:"+(.priority|tostring)+">, "+(.progress*100|trunc|tostring)+"% of "+(.size /1048576|trunc|tostring)+"Mb, "+(.availability*100|trunc|tostring)+"% online"'

@@ -1,0 +1,27 @@
+---
+version: "2.1"
+volumes:
+  teleport-data:
+
+services:
+  teleport:
+    image: public.ecr.aws/gravitational/teleport:13
+    user: 1000:1000
+    container_name: teleport
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+    entrypoint: /bin/sh
+    command: -c "/usr/bin/dumb-init teleport start -d -c /etc/teleport/teleport.yml"
+    ports:
+      - 3023:3023
+      - 3024:3024
+      - 3025:3025
+      - 3443:443
+    volumes:
+      - /opt/DockerApps/teleport/config:/etc/teleport
+      - /opt/DockerApps/teleport/teleport-data:/var/lib/teleport
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"

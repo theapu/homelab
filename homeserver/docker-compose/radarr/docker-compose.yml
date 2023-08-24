@@ -1,0 +1,22 @@
+---
+version: "2.1"
+services:
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+    volumes:
+      - /opt/DockerApps/radarr/config:/config
+      - /media/pi/Downloads/torrents:/downloads
+      - /media/pi/Thorin:/Thorin
+      - /media/pi/Balin:/Balin
+      - /media/pi/Dori:/Dori
+      - /media/pi/Nori:/Nori
+    ports:
+      - 7878:7878
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope" 

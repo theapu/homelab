@@ -1,0 +1,22 @@
+---
+version: "3.7"
+
+services:
+  node-red:
+    image: nodered/node-red:latest
+    container_name: nodered
+    environment:
+      - TZ=Asia/Kolkata
+    ports:
+      - "1880:1880"
+      - "3456:3456"
+    networks:
+      - node-red-net
+    volumes:
+      - /opt/DockerApps/nodered:/data
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"
+      
+networks:
+  node-red-net:

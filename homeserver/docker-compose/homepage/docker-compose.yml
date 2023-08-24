@@ -1,0 +1,39 @@
+version: "3.3"
+services:
+  dockerproxy:
+    image: ghcr.io/tecnativa/docker-socket-proxy:latest
+    container_name: dockerproxy
+    environment:
+        - CONTAINERS=1 # Allow access to viewing containers
+        - POST=0 # Disallow any POST operations (effectively read-only)
+    ports:
+        - 2375:2375
+    volumes:
+        - /var/run/docker.sock:/var/run/docker.sock:ro # Mounted as read-only
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope" 
+
+  homepage:
+    image: ghcr.io/benphelps/homepage:latest
+    container_name: homepage
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+    ports:
+      - 3000:3000
+    volumes:
+      - /opt/DockerApps/homepage/config:/app/config # Make sure your local config directory exists
+      - /media/pi/Thorin:/mnt/Thorin
+      - /media/pi/Balin:/mnt/Balin
+      - /media/pi/Dori:/mnt/Dori
+      - /media/pi/Nori:/mnt/Nori
+      - /media/pi/Ocean:/mnt/Ocean
+      - /media/pi/Rusty:/mnt/Rusty
+      - /media/pi/Linus:/mnt/Linus
+      - /media/pi/Yen:/mnt/Yen
+      - /media/pi/Downloads:/mnt/Downloads
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope" 

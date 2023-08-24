@@ -1,0 +1,31 @@
+version: "3"
+services:
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtowermonitoronly
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      TZ: 'Asia/Kolkata'
+      WATCHTOWER_MONITOR_ONLY: 'true'
+      WATCHTOWER_SCOPE: monitoronlyscope
+      WATCHTOWER_INCLUDE_STOPPED: 'true'
+      WATCHTOWER_REVIVE_STOPPED: 'false'
+      WATCHTOWER_CLEANUP: 'false'
+      WATCHTOWER_NOTIFICATIONS: email
+      WATCHTOWER_NOTIFICATION_EMAIL_FROM: <From email id>
+      WATCHTOWER_NOTIFICATION_EMAIL_TO: <To email id>
+      WATCHTOWER_NOTIFICATION_EMAIL_SERVER: <SMTP server>
+      WATCHTOWER_NOTIFICATION_EMAIL_SERVER_PORT: <PORT>
+      WATCHTOWER_NOTIFICATION_EMAIL_SERVER_USER: <From email id>
+      WATCHTOWER_NOTIFICATION_EMAIL_SERVER_PASSWORD: <From email id password>
+      WATCHTOWER_NOTIFICATION_EMAIL_DELAY: 2
+      WATCHTOWER_NOTIFICATION_EMAIL_SUBJECTTAG: "Homeserver Monitor"
+      WATCHTOWER_SCHEDULE: "0 0 5 * * 0"
+      WATCHTOWER_HTTP_API_TOKEN: mytoken
+      WATCHTOWER_HTTP_API_METRICS: true
+    ports:
+      - 48081:8080
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitoronlyscope"
+    restart: unless-stopped

@@ -1,0 +1,21 @@
+---
+version: "3"
+services:
+  file-browser:
+    image: filebrowser/filebrowser
+    container_name: file-browser
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+      - "FB_CONFIG=/filebrowser.json"
+      - "FB_DATABASE=/database/filebrowser.db"
+    volumes:
+      - /media/pi/:/srv
+      - /opt/DockerApps/filebrowser/filebrowser.db:/database/filebrowser.db
+      - /opt/DockerApps/filebrowser/filebrowser.json:/filebrowser.json
+    ports:
+      - 38080:80
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"

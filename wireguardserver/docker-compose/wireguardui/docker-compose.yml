@@ -1,0 +1,35 @@
+version: "3"
+
+#Note: Install wireguard in system. https://www.wireguard.com/install/
+#Configure wireguard from wireguard web UI.
+services:
+  wireguardui:
+    image: ngoduykhanh/wireguard-ui:latest
+    container_name: wireguardui
+    cap_add:
+      - NET_ADMIN
+    network_mode: host
+    environment:
+      - SESSION_SECRET=<secret key>
+      - WGUI_USERNAME=<wireguard web UI admin user>
+      - WGUI_PASSWORD=<wireguard web UI admin password>
+      - WGUI_SERVER_INTERFACE_ADDRESSES=<wireguard server IP>/<subnet mask> #Example 10.255.11.1/24
+      - WGUI_SERVER_LISTEN_PORT=<wireguard server port>
+      - WGUI_SERVER_POST_UP_SCRIPT=/etc/wireguard/wg0postup.sh
+      - WGUI_SERVER_POST_DOWN_SCRIPT=/etc/wireguard/wg0predown.sh
+      - BASE_PATH=/
+      - SENDGRID_API_KEY=<sendgrid api key>
+      - EMAIL_FROM_ADDRESS=<sendgrid from email id>
+      - EMAIL_FROM_NAME="<Email sender Name>"
+      - WGUI_MANAGE_START=false
+      - WGUI_MANAGE_RESTART=false
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+    volumes:
+      - /opt/DockerApps/wireguardui/db:/app/db
+      - /etc/wireguard:/etc/wireguard
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"

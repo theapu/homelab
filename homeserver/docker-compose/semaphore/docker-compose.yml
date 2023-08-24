@@ -1,0 +1,52 @@
+---
+volumes:
+  semaphore-mysql:
+    driver: local
+services:
+  mysql:
+    container_name: ansiblesemaphoremysql
+    image: mysql:8.0
+    hostname: mysql
+    volumes:
+      - semaphore-mysql:/var/lib/mysql
+    environment:
+      - MYSQL_RANDOM_ROOT_PASSWORD=yes
+      - MYSQL_DATABASE=<mysql database name>
+      - MYSQL_USER=<mysql database user>
+      - MYSQL_PASSWORD=<mysql password>  # change!
+      - TZ=Asia/Kolkata
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"
+
+  semaphore:
+    container_name: ansiblesemaphore
+    image: semaphoreui/semaphore:latest
+    user: "${UID}:${GID}"
+    ports:
+      - 13000:3000
+    environment:
+      - TZ=Asia/Kolkata
+      - SEMAPHORE_DB_USER=<mysql database user>
+      - SEMAPHORE_DB_PASS=<mysql password>  # change!
+      - SEMAPHORE_DB_HOST=mysql
+      - SEMAPHORE_DB_PORT=3306
+      - SEMAPHORE_DB_DIALECT=mysql
+      - SEMAPHORE_DB=<mysql database name>
+      - SEMAPHORE_PLAYBOOK_PATH=/tmp/semaphore/
+      - SEMAPHORE_ADMIN_PASSWORD=<WEB ui admin login password>   # change!
+      - SEMAPHORE_ADMIN_NAME=<Name of admin>
+      - SEMAPHORE_ADMIN_EMAIL=<Admin email id>
+      - SEMAPHORE_ADMIN=<WEB ui admin username> 
+      - SEMAPHORE_ACCESS_KEY_ENCRYPTION=<key>  # add to your access key encryption !
+      - ANSIBLE_HOST_KEY_CHECKING=false  # (optional) change to true if you want to enable host key checking
+    volumes:
+      - /opt/DockerApps/semaphore/inventory/:/inventory:ro
+      - /opt/DockerApps/semaphore/authorized-keys/:/authorized-keys:ro
+      - /opt/DockerApps/semaphore/config/:/etc/semaphore:rw
+
+    restart: unless-stopped
+    depends_on:
+      - mysql
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"

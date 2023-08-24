@@ -1,0 +1,18 @@
+---
+version: "2.1"
+services:
+  snapdrop:
+    image: lscr.io/linuxserver/snapdrop:latest
+    container_name: snapdrop
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+    volumes:
+      - /opt/DockerApps/snapdrop:/config
+    ports:
+      - 33080:80
+      - 33443:443
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope" 

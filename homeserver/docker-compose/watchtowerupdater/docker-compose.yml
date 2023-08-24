@@ -1,0 +1,33 @@
+version: "3"
+services:
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      #- /opt/DockerApps/watchtower/config/config.json:/config.json
+    environment:
+      TZ: 'Asia/Kolkata'
+      WATCHTOWER_MONITOR_ONLY: 'false'
+      WATCHTOWER_SCOPE: monitorscope
+      WATCHTOWER_INCLUDE_STOPPED: 'true'
+      WATCHTOWER_REVIVE_STOPPED: 'true'
+      WATCHTOWER_CLEANUP: 'true'
+      WATCHTOWER_NOTIFICATIONS: email
+      WATCHTOWER_NOTIFICATION_EMAIL_FROM: <From email id>
+      WATCHTOWER_NOTIFICATION_EMAIL_TO: <To email id>
+      WATCHTOWER_NOTIFICATION_EMAIL_SERVER: <SMTP server>
+      WATCHTOWER_NOTIFICATION_EMAIL_SERVER_PORT: <PORT>
+      WATCHTOWER_NOTIFICATION_EMAIL_SERVER_USER: <From email id>
+      WATCHTOWER_NOTIFICATION_EMAIL_SERVER_PASSWORD: <From email id password>
+      WATCHTOWER_NOTIFICATION_EMAIL_DELAY: 2
+      WATCHTOWER_NOTIFICATION_EMAIL_SUBJECTTAG: "Homeserver Update"
+      WATCHTOWER_SCHEDULE: "0 0 4 * * 0"
+      WATCHTOWER_HTTP_API_TOKEN: mytoken
+      WATCHTOWER_HTTP_API_METRICS: true
+    ports:
+      - 48080:8080
+    command: --cleanup
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"
+    restart: unless-stopped

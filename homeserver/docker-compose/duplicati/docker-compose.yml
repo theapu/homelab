@@ -1,0 +1,19 @@
+---
+version: "2.1"
+services:
+  duplicati:
+    image: lscr.io/linuxserver/duplicati:latest
+    container_name: duplicati
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+    volumes:
+      - /opt/DockerApps/duplicati/appdata/config:/config
+      - /media/pi/Yen/Backups:/backups
+      - /media/pi/Downloads:/source
+    ports:
+      - 8200:8200
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope" 
