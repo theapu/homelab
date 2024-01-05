@@ -1,0 +1,15 @@
+version: '3.3'
+    
+services:
+  authelia:
+    image: authelia/authelia
+    container_name: authelia
+    volumes:
+      - /opt/DockerApps/authelia:/config
+    ports:
+      - 9099:9091
+    environment:
+      - TZ=Asia/Kolkata
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"
