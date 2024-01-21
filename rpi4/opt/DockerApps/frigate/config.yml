@@ -1,0 +1,39 @@
+mqtt:
+  enabled: True
+  host: <mqtt host ip>
+  port: <mqtt host port>
+  user: "<username>"
+  password: "<password>"
+
+birdseye:
+  enabled: False
+
+snapshots:
+  enabled: False
+
+ffmpeg:
+  hwaccel_args: preset-rpi-64-h264
+
+cameras:
+  front:
+    enabled: True
+    ffmpeg:
+      inputs:
+        - path: rtsp://<username>:<password>@<camera ip>:<port>/<stream name>
+          roles:
+            - detect
+        - path: rtsp://<username>:<password>@<camera ip>:<port>/<stream name>
+          roles:
+            - record
+
+detect:
+  enabled: False
+  width: 1280
+  height: 720
+  fps: 20
+
+record:
+  enabled: True
+  retain:
+    days: 10
+    mode: all

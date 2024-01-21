@@ -1,0 +1,37 @@
+version: "3.9"
+services:
+  frigate:
+    container_name: frigate
+    restart: unless-stopped
+    image: ghcr.io/blakeblackshear/frigate:stable
+    shm_size: "64mb"
+    devices:
+      - /dev/video10
+      - /dev/video11
+      - /dev/video12
+      - /dev/video13
+      - /dev/video14
+      - /dev/video15
+      - /dev/video16
+      - /dev/video18
+      - /dev/video19
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /opt/DockerApps/frigate/config.yml:/config/config.yml
+      - /opt/DockerApps/frigate/storage:/media/frigate
+      - type: tmpfs # Optional: 1GB of memory, reduces SSD/SD Card wear
+        target: /tmp/cache
+        tmpfs:
+          size: 1000000000
+    ports:
+      - "5000:5000"
+      - "8554:8554" # RTSP feeds
+      - "8555:8555/tcp" # WebRTC over tcp
+      - "8555:8555/udp" # WebRTC over udp
+    environment:
+      FRIGATE_RTSP_USER: "<username>" # These environment variables does not work in config.yml
+      FRIGATE_RTSP_PASSWORD: "<password>"
+      FRIGATE_MQTT_USER: "<mqtt username>"
+      FRIGATE_MQTT_PASSWORD: "<mqtt password>"
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"
