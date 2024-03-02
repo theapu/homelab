@@ -1,0 +1,17 @@
+---
+services:
+  rsnapshot:
+    image: lscr.io/linuxserver/rsnapshot:latest
+    container_name: rsnapshot
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Kolkata
+    volumes:
+      - /opt/DockerApps/rsnapshot/config:/config
+      - /media/pi/Downloads/rsnapshot-backups:/.snapshots #optional
+      - /opt:/data/opt:ro #optional
+      - /home/pi/.config:/data/home/pi/.config:ro #optional
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"
