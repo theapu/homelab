@@ -1,39 +1,79 @@
 mqtt:
-  enabled: True
-  host: <mqtt host ip>
-  port: <mqtt host port>
-  user: "<username>"
-  password: "<password>"
+  enabled: true
+  host: <HA IP>
+  port: <HA mqtt port>
+  user: <HA mqtt user>
+  password: <HA mqtt password>
 
 birdseye:
-  enabled: False
+  enabled: false
 
 snapshots:
-  enabled: False
+  enabled: true
+  retain:
+    default: 10
 
 ffmpeg:
   hwaccel_args: preset-rpi-64-h264
 
+objects:
+  track:
+    - person
+    - cat
+    - dog
+    - bird
+
+go2rtc:
+  rtsp:
+    username: admin
+    password: iamlegend10
+  streams:
+    front_main_stream:
+      - rtsp://<username>:<password>@<ip>:<port>/<main_stream>
+    front_sub_stream:
+      - tsp://<username>:<password>@<ip>:<port>/<sub_stream>
+  webrtc:
+    candidates:
+      - <Frigate IP>:8555
+      - stun:8555
+
 cameras:
   front:
-    enabled: True
+    enabled: true
     ffmpeg:
       inputs:
-        - path: rtsp://<username>:<password>@<camera ip>:<port>/<stream name>
+        - path: rtsp://<username>:<password>@127.0.0.1:8554/front_main_stream
+          input_args: preset-rtsp-restream
           roles:
             - detect
-        - path: rtsp://<username>:<password>@<camera ip>:<port>/<stream name>
-          roles:
             - record
+    motion:
+      mask: 0.098,0.097,0.405,0.096,0.405,0.057,0.097,0.057
+    live:
+      stream_name: front_sub_stream
+
+    objects:
+      filters:
+        person:
+          mask: 0.95,0.003,0.893,0.339,0.836,0.404,0.778,0.327,0.821,0
+detectors:
+  coral:
+    type: edgetpu
+    device: usb
 
 detect:
-  enabled: False
+  enabled: true
   width: 1280
   height: 720
-  fps: 20
+  fps: 5
 
 record:
-  enabled: True
+  enabled: true
   retain:
     days: 10
     mode: all
+  events:
+    retain:
+      default: 10
+      mode: active_objects
+version: 0.14
