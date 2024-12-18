@@ -1,0 +1,21 @@
+
+services:
+  rathole:
+    image: rapiz1/rathole
+    container_name: rathole-server
+    ports:
+      - "2333:2333"
+      - "29001:29001"
+      - "5000:5000"
+      - "28081:28081"
+      - "3001:3001"
+      - "9090:9090"
+      - "9100:9100"
+    volumes:
+      - /opt/DockerApps/rathole/server.toml:/app/config.toml
+    command: --server /app/config.toml
+    environment:
+      - TZ=Asia/Kolkata
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"
