@@ -1,0 +1,15 @@
+
+
+services:
+  rathole:
+    image: rapiz1/rathole
+    container_name: rathole-client
+    network_mode: "host" 
+    volumes:
+      - /opt/DockerApps/rathole/client.toml:/app/config.toml
+    command: --client /app/config.toml
+    environment:
+      - TZ=Asia/Kolkata
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"
