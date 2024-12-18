@@ -1,0 +1,41 @@
+---
+
+services:
+  bookstack:
+    image: lscr.io/linuxserver/bookstack
+    container_name: bookstack
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - APP_URL=<URL>
+      - DB_HOST=bookstack_db
+      - DB_PORT=3306
+      - DB_USER=<DB username>
+      - DB_PASS=<DB password>
+      - DB_DATABASE=bookstackapp
+    volumes:
+      - /opt/DockerApps/bookstack/bookstack_app_data:/config
+    ports:
+      - 6875:80
+    restart: unless-stopped
+    depends_on:
+      - bookstack_db
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"
+      
+  bookstack_db:
+    image: lscr.io/linuxserver/mariadb
+    container_name: bookstack_db
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - MYSQL_ROOT_PASSWORD=<ROOT password>
+      - TZ=Asia/Kolkata
+      - MYSQL_DATABASE=bookstackapp
+      - MYSQL_USER=<DB username>
+      - MYSQL_PASSWORD=<DB password>
+    volumes:
+      - /opt/DockerApps/bookstack/bookstack_db_data:/config
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.scope=monitorscope"
